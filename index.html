@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>录音·转写 交互动效演示</title>
+<style>
+  :root{
+    --ease: cubic-bezier(0, 0, 0.2, 1); /* ease-out */
+    --dur: 0.5s;
+    --text: #e8edf5;
+    --sub: #8794aa;
+    --red: #ff4d4f;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{
+    width:100%; height:100%;
+    background:#05080f;
+    font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+
+  /* 舞台 16:9，基准 1080x608，自适应缩放 */
+  .stage{
+    position:relative;
+    width:1080px; height:608px;
+    border-radius:14px;
+    overflow:hidden;
+    color:var(--text);
+    box-shadow:0 30px 80px rgba(0,0,0,.6);
+    background:
+      radial-gradient(120% 90% at 88% 8%, rgba(60,110,190,.38) 0%, rgba(30,60,110,0) 45%),
+      radial-gradient(90% 120% at 6% 92%, rgba(30,70,130,.30) 0%, rgba(20,45,90,0) 50%),
+      linear-gradient(140deg, #0c1c34 0%, #12294a 42%, #0e2543 70%, #0a1b32 100%);
+    transform-origin:center center;
+  }
+  .stage::before{
+    content:""; position:absolute; top:-40%; right:-15%;
+    width:900px; height:900px; border-radius:50%;
+    background:radial-gradient(circle at 30% 70%, rgba(80,130,210,.12), transparent 60%);
+    pointer-events:none;
+  }
+  .stage::after{
+    content:""; position:absolute; bottom:-30%; left:-10%;
+    width:700px; height:700px; border-radius:50%;
+    background:radial-gradient(circle at 60% 40%, rgba(40,90,160,.10), transparent 62%);
+    pointer-events:none;
+  }
+
+  /* 顶栏 */
+  .topbar{
+    position:absolute; top:0; left:0; right:0; height:40px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:14px; color:#c6d0de; letter-spacing:.5px; z-index:50;
+  }
+  .topbar .icons{ position:absolute; left:16px; display:flex; gap:8px; align-items:center; }
+  .topbar .ic{ width:22px; height:16px; border-radius:4px; }
+  .ic.a{ background:linear-gradient(135deg,#ff7a45,#ff4d4f); }
+  .ic.b{ background:linear-gradient(135deg,#36cfc9,#3aa0ff); }
+  .ic.c{ display:flex; gap:2px; align-items:flex-end; background:none; width:auto; }
+  .ic.c i{ width:3px; background:#52c41a; border-radius:1px; display:block; }
+  .ic.c i:nth-child(1){ height:5px; } .ic.c i:nth-child(2){ height:9px; }
+  .ic.c i:nth-child(3){ height:13px; opacity:.5; }
+
+  /* ============ 左侧转写文本面板 ============ */
+  .transcript{
+    position:absolute; top:40px; bottom:74px; left:0; width:648px;
+    padding:26px 30px 8px;
+    overflow:hidden;
+    opacity:0; transform:translateX(70px);
+    transition:opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+    z-index:20;
+    -webkit-mask-image:linear-gradient(180deg,#000 88%,transparent);
+  }
+  .stage.on .transcript{ opacity:1; transform:translateX(0); }
+  .msg{
+    margin-bottom:16px;
+    opacity:0; transform:translateX(-28px);
+    transition:opacity .5s var(--ease), transform .5s var(--ease);
+  }
+  .stage.on .msg{ opacity:1; transform:translateX(0); }
+  .msg .ts{ font-size:12px; color:var(--sub); margin-bottom:5px; }
+  .msg .tx{ font-size:14.5px; line-height:1.75; color:#d5deec; }
+  .stage.on .msg:nth-child(1){ transition-delay:.20s; }
+  .stage.on .msg:nth-child(2){ transition-delay:.30s; }
+  .stage.on .msg:nth-child(3){ transition-delay:.40s; }
+  .stage.on .msg:nth-child(4){ transition-delay:.50s; }
+  .stage.on .msg:nth-child(5){ transition-delay:.60s; }
+  .stage.on .msg:nth-child(6){ transition-delay:.70s; }
+
+  /* 转写态左右分隔竖线 */
+  .divider{
+    position:absolute; top:70px; bottom:70px; left:648px; width:1px;
+    background:linear-gradient(180deg,transparent,rgba(255,255,255,.14) 18%,rgba(255,255,255,.14) 82%,transparent);
+    opacity:0; transition:opacity var(--dur) var(--ease); transition-delay:.1s; z-index:15;
+  }
+  .stage.on .divider{ opacity:1; }
+
+  /* ============ 录音模块 ============ */
+  .recorder{
+    position:absolute; top:50%; left:50%;
+    width:520px;
+    transform:translate(-50%,-50%);
+    transition:transform var(--dur) var(--ease), width var(--dur) var(--ease);
+    display:flex; flex-direction:column; align-items:center;
+    z-index:30;
+  }
+  /* 转写态：右移 + 靠左对齐（对齐图1右侧样式）+ 等比收窄 */
+  .stage.on .recorder{
+    width:378px;
+    align-items:flex-start;
+    transform:translate(calc(-50% + 342px),-50%);
+  }
+
+  .rec-status{
+    display:flex; align-items:center; gap:8px; font-size:16px; color:#d5deec;
+    transition:font-size var(--dur) var(--ease);
+  }
+  .stage.on .rec-status{ font-size:15px; }
+  .rec-status .dot{
+    width:9px; height:9px; border-radius:50%; background:var(--red);
+    box-shadow:0 0 8px rgba(255,77,79,.8); animation:blink 1.4s infinite;
+  }
+  @keyframes blink{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+  .rec-timer{
+    font-size:58px; font-weight:700; letter-spacing:2px; margin:14px 0 26px;
+    font-variant-numeric:tabular-nums; color:#f2f6fc;
+    transition:font-size var(--dur) var(--ease), margin var(--dur) var(--ease);
+  }
+  .stage.on .rec-timer{ font-size:44px; margin:12px 0 22px; }
+
+  .waveform{
+    display:flex; align-items:center; justify-content:center; gap:5px;
+    height:68px; width:100%;
+    transition:height var(--dur) var(--ease), gap var(--dur) var(--ease);
+  }
+  .stage.on .waveform{ height:56px; gap:3px; justify-content:flex-start; }
+  .waveform i{
+    width:3px; border-radius:3px; display:block; flex:0 0 auto;
+    background:linear-gradient(180deg,#bcd6ff,#4a86e0);
+    animation:wave 1s ease-in-out infinite;
+  }
+  @keyframes wave{ 0%,100%{ transform:scaleY(.55);} 50%{ transform:scaleY(1);} }
+
+  .rec-hint{
+    margin-top:22px; font-size:14px; color:var(--sub); text-align:center;
+    transition:font-size var(--dur) var(--ease), margin var(--dur) var(--ease);
+  }
+  .stage.on .rec-hint{ font-size:13px; margin-top:18px; text-align:left; }
+  .rec-hint b{ color:#aab6c8; font-weight:400; }
+
+  .rec-controls{
+    margin-top:30px; display:flex; align-items:center; gap:16px;
+    transition:margin var(--dur) var(--ease);
+  }
+  .stage.on .rec-controls{ margin-top:26px; }
+  .btn-circle{
+    width:56px; height:56px; border-radius:50%; border:none; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .2s, background .2s, width var(--dur) var(--ease), height var(--dur) var(--ease);
+  }
+  .stage.on .btn-circle{ width:50px; height:50px; }
+  .btn-circle:hover{ transform:scale(1.06); }
+  .btn-pause{ background:rgba(255,255,255,.10); }
+  .btn-stop{ background:var(--red); box-shadow:0 6px 18px rgba(255,77,79,.35); }
+
+  /* 转写药丸按钮：转写态渐隐收起 */
+  .btn-transcribe{
+    display:flex; align-items:center; gap:6px;
+    height:44px; padding:0 20px; border:none; border-radius:24px; cursor:pointer;
+    background:rgba(255,255,255,.10); color:#e8edf5; font-size:15px; white-space:nowrap;
+    overflow:hidden; max-width:130px; margin-right:0;
+    transition:opacity var(--dur) var(--ease), max-width var(--dur) var(--ease),
+               margin var(--dur) var(--ease), padding var(--dur) var(--ease), transform .2s;
+  }
+  .btn-transcribe:hover{ background:rgba(255,255,255,.16); }
+  .stage.on .btn-transcribe{
+    opacity:0; max-width:0; padding:0; margin-right:-16px; pointer-events:none;
+  }
+
+  /* ============ 底部工具栏（转写态）============ */
+  .bottom-tools{
+    position:absolute; left:0; width:648px; bottom:22px;
+    padding-right:30px;
+    transform:translateY(8px);
+    display:flex; align-items:center; justify-content:flex-end; gap:14px;
+    opacity:0; pointer-events:none;
+    transition:opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+    transition-delay:.15s; z-index:40;
+  }
+  .stage.on .bottom-tools{ opacity:1; transform:translateY(0); pointer-events:auto; }
+  .tool{
+    height:40px; border-radius:20px; border:none; cursor:pointer;
+    background:rgba(255,255,255,.08); color:#dbe3ef;
+    display:flex; align-items:center; justify-content:center; gap:7px;
+    transition:background .2s;
+  }
+  .tool:hover{ background:rgba(255,255,255,.15); }
+  .tool.icon-only{ width:40px; }
+  .tool.close{ padding:0 18px; font-size:14px; }
+
+  svg{ display:block; }
+
+  .tip{
+    position:absolute; top:52px; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,.35); color:#9fb0c8; font-size:12px;
+    padding:5px 14px; border-radius:20px; z-index:60;
+    backdrop-filter:blur(4px); pointer-events:none;
+  }
+</style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <!-- 顶栏 -->
+    <div class="topbar">
+      <div class="icons">
+        <span class="ic a"></span>
+        <span class="ic b"></span>
+        <span class="ic c"><i></i><i></i><i></i></span>
+      </div>
+      20260717 录音文件
+    </div>
+
+
+    <!-- 左侧转写文本 -->
+    <div class="transcript">
+      <div class="msg">
+        <div class="tx">你看原来我们不是这样的嘛，然后现在是只有元宝纪要，没有完会的情况，就假如说三个人开会，其中有一个人退出了，那这个会议其实还在，它只显示这个元宝纪要。</div>
+      </div>
+      <div class="msg">
+        <div class="ts">00:20</div>
+        <div class="tx">背景功能丰富，可显示时钟、照片，展示重要通知等。将在那个行星系中游荡，它们合在一起也没有细菌的亿万分之一那么大。越来越多的智子将在那个行星系中游荡。</div>
+      </div>
+      <div class="msg">
+        <div class="ts">00:35</div>
+        <div class="tx">你看原来我们不是这样的嘛，然后现在是只有元宝纪要，没有完会的情况，就假如说三个人开会，其中有一个人退出了，那这个会议其实还在，它只显示这个元宝纪要。但是底下会有一个瞬态，就是我这个页面就底下会有一个损态。</div>
+      </div>
+      <div class="msg">
+        <div class="ts">00:50</div>
+        <div class="tx">你看原来我们不是这样的嘛，然后现在是只有元宝纪要，没有完会的情况，就假如说三个人开会，其中有一个人退出了，那这个会议其实还在，它只显示这个元宝纪要。但是底下会有一个瞬态，就是我这个页面就底下会有一个损态。</div>
+      </div>
+      <div class="msg">
+        <div class="ts">01:10</div>
+        <div class="tx">然后就是滚动的效果，就滑动的时候的效果，它这里有个遮罩什么的，这个就是滚动的一个效果。但其实我觉得立昌这个稿子已经差不多，已经还原，但对你。</div>
+      </div>
+      <div class="msg">
+        <div class="ts">01:35</div>
+        <div class="tx">好的，今天的会议就开到这里，待办事项我将整理成文档发送到讨论组中，接下来的日子希望大家继续保持高效协作，全力以赴推进各项工作，期待与大家携手并进，共同创造下半年的辉煌 •••</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 录音模块 -->
+    <div class="recorder" id="recorder">
+      <div class="rec-status"><span class="dot"></span>录音中</div>
+      <div class="rec-timer">00<span style="opacity:.6">:</span>37</div>
+      <div class="waveform" id="waveform"></div>
+      <div class="rec-hint">结束录音后，录音文件<b>将存入"唐兰蕾"的录制中</b></div>
+      <div class="rec-controls">
+        <button class="btn-transcribe" id="btnTranscribe">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dbe3ef" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/>
+          </svg>
+          转写
+        </button>
+        <button class="btn-circle btn-pause" title="暂停">
+          <svg width="20" height="20" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.4" fill="#fff"/><rect x="13.5" y="5" width="4" height="14" rx="1.4" fill="#fff"/></svg>
+        </button>
+        <button class="btn-circle btn-stop" title="停止">
+          <svg width="18" height="18" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3" fill="#fff"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 底部工具栏（转写态） -->
+    <div class="bottom-tools">
+      <button class="tool icon-only" title="翻译">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dbe3ef" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <!-- 取景框四角 -->
+          <path d="M4 7V5.6A1.6 1.6 0 0 1 5.6 4H7"/>
+          <path d="M10.4 4h1.4A1.6 1.6 0 0 1 13.4 5.6V7"/>
+          <path d="M4 10.4v1.4A1.6 1.6 0 0 0 5.6 13.4H7"/>
+          <path d="M10.4 13.4h1.4A1.6 1.6 0 0 0 13.4 11.8v-1.4"/>
+          <!-- 中字 -->
+          <path d="M6.7 8.7h4"/><path d="M8.7 6.4v5.4"/>
+          <!-- A字 -->
+          <path d="M14 20.5l3.3-9 3.3 9M15.3 17h4"/>
+        </svg>
+      </button>
+      <button class="tool icon-only" title="字号">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dbe3ef" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <!-- 斜A -->
+          <path d="M4.5 19L10 5.5 12.8 19M6.3 14.5h5.2"/>
+          <!-- 正A -->
+          <path d="M14.8 19l2.9-8 2.9 8M15.9 15.8h3.6"/>
+        </svg>
+      </button>
+      <button class="tool close" id="btnClose">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dbe3ef" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        关闭转写
+      </button>
+    </div>
+  </div>
+
+<script>
+  // 生成声波波形条（高度用百分比，随模块高度自适应）
+  const wf = document.getElementById('waveform');
+  const N = 62;
+  for(let i=0;i<N;i++){
+    const bar = document.createElement('i');
+    const env = Math.sin((i/(N-1))*Math.PI);          // 中间高两侧低
+    const h = 14 + env*78*(0.45+Math.random()*0.55);  // 14% ~ 92%
+    bar.style.height = h.toFixed(0)+'%';
+    bar.style.animationDelay = (-(Math.random()*1)).toFixed(2)+'s';
+    bar.style.animationDuration = (0.7+Math.random()*0.7).toFixed(2)+'s';
+    wf.appendChild(bar);
+  }
+
+  const stage = document.getElementById('stage');
+  const btnT = document.getElementById('btnTranscribe');
+  const btnC = document.getElementById('btnClose');
+  btnT.addEventListener('click', ()=> stage.classList.add('on'));
+  btnC.addEventListener('click', ()=> stage.classList.remove('on'));
+
+  // 自适应缩放
+  function fit(){
+    const s = Math.min(window.innerWidth/1080, window.innerHeight/608) * 0.96;
+    stage.style.transform = 'scale('+s+')';
+  }
+  window.addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>
